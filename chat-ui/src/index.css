@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Dark theme code blocks */
+.hljs {
+  background: #1e1e1e !important;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+}
+
+/* Scrollbar styling for dark mode */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1f2937;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+/* Markdown prose styling */
+.prose {
+  color: #e5e7eb;
+}
+
+.prose code {
+  color: #e5e7eb;
+  background: #374151;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+}
+
+.prose pre {
+  background: #1e1e1e;
+  margin: 1rem 0;
+  position: relative;
+}
+
+.prose pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.prose a {
+  color: #60a5fa;
+}
+
+.prose strong {
+  color: #f3f4f6;
+}
+
+.prose h1, .prose h2, .prose h3, .prose h4 {
+  color: #f3f4f6;
+}
+
+.prose ul, .prose ol {
+  color: #e5e7eb;
+}
+
+.prose blockquote {
+  border-left-color: #4b5563;
+  color: #9ca3af;
+}

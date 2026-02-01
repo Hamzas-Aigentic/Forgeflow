@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  forgeflow-bridge:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - SESSION_TIMEOUT_MS=3600000
+      - CLAUDE_COMMAND=claude
+      - LOG_LEVEL=info
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      - claude-config:/root/.config/claude
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  claude-config:
