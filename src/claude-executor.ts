@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
-import type { Message, ClaudeExecutionResult } from './types.js';
+import { createInterface } from 'readline';
+import type { Message, ClaudeExecutionResult, ExecutorYield, ActivityEvent } from './types.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { parseWorkflowIds } from './response-parser.js';
@@ -20,10 +21,85 @@ function formatConversation(history: Message[], newMessage: string): string {
   return parts.join('\n\n');
 }
 
+function generateActivityId(): string {
+  return Math.random().toString(36).substring(2, 15);
+}
+
+interface ParsedLine {
+  type: 'text' | 'activity' | 'none';
+  content?: string;
+  event?: ActivityEvent;
+}
+
+function processLine(line: string, currentToolId: { value: string | null }): ParsedLine {
+  if (!line.trim()) return { type: 'none' };
+
+  try {
+    const parsed = JSON.parse(line);
+
+    // Tool use start - content_block_start with tool_use type
+    if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
+      const toolName = parsed.content_block.name;
+      const toolId = parsed.content_block.id;
+      currentToolId.value = toolId;
+
+      return {
+        type: 'activity',
+        event: {
+          id: generateActivityId(),
+          type: 'tool_start',
+          timestamp: new Date(),
+          toolName,
+          toolId,
+        },
+      };
+    }
+
+    // Tool result
+    if (parsed.type === 'result') {
+      const event: ActivityEvent = {
+        id: generateActivityId(),
+        type: 'tool_result',
+        timestamp: new Date(),
+        toolId: currentToolId.value || undefined,
+        result: {
+          success: !parsed.is_error,
+          error: parsed.is_error ? parsed.error : undefined,
+        },
+      };
+      currentToolId.value = null;
+      return { type: 'activity', event };
+    }
+
+    // Text content from assistant message
+    if (parsed.type === 'assistant' && parsed.message?.content) {
+      for (const block of parsed.message.content) {
+        if (block.type === 'text' && block.text) {
+          return { type: 'text', content: block.text };
+        }
+      }
+    }
+
+    // Streaming text delta
+    if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+      return { type: 'text', content: parsed.delta.text };
+    }
+
+    // Message delta text
+    if (parsed.type === 'message_delta' && parsed.delta?.text) {
+      return { type: 'text', content: parsed.delta.text };
+    }
+  } catch {
+    logger.debug('Non-JSON line from Claude', { line });
+  }
+
+  return { type: 'none' };
+}
+
 export async function* executeClaudeCommand(
   history: Message[],
   newMessage: string
-): AsyncGenerator<string, ClaudeExecutionResult, unknown> {
+): AsyncGenerator<ExecutorYield, ClaudeExecutionResult, unknown> {
   const conversation = formatConversation(history, newMessage);
 
   logger.debug('Executing Claude command', { historyLength: history.length });
@@ -36,68 +112,41 @@ export async function* executeClaudeCommand(
   proc.stdin.end();
 
   let fullResponse = '';
-  let buffer = '';
+  const currentToolId = { value: null as string | null };
 
-  const processLine = (line: string): string | null => {
-    if (!line.trim()) return null;
+  // Create readline interface for real-time line processing
+  const rl = createInterface({
+    input: proc.stdout,
+    crlfDelay: Infinity,
+  });
 
-    try {
-      const parsed = JSON.parse(line);
+  // Process lines as they arrive
+  for await (const line of rl) {
+    const result = processLine(line, currentToolId);
 
-      if (parsed.type === 'assistant' && parsed.message?.content) {
-        for (const block of parsed.message.content) {
-          if (block.type === 'text' && block.text) {
-            return block.text;
-          }
-        }
-      }
-
-      if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-        return parsed.delta.text;
-      }
-
-      if (parsed.type === 'message_delta' && parsed.delta?.text) {
-        return parsed.delta.text;
-      }
-    } catch {
-      logger.debug('Non-JSON line from Claude', { line });
+    if (result.type === 'text' && result.content) {
+      fullResponse += result.content;
+      yield { type: 'text', content: result.content };
+    } else if (result.type === 'activity' && result.event) {
+      yield { type: 'activity', event: result.event };
     }
+  }
 
-    return null;
-  };
-
-  const dataPromise = new Promise<string>((resolve, reject) => {
-    const chunks: string[] = [];
-
-    proc.stdout.on('data', (data: Buffer) => {
-      chunks.push(data.toString());
-    });
-
-    proc.stderr.on('data', (data: Buffer) => {
-      logger.warn('Claude stderr', { data: data.toString() });
-    });
-
+  // Wait for process to complete
+  await new Promise<void>((resolve, reject) => {
     proc.on('close', (code) => {
       if (code !== 0) {
         logger.error('Claude process exited with error', { code });
       }
-      resolve(chunks.join(''));
+      resolve();
     });
-
     proc.on('error', reject);
   });
 
-  const rawOutput = await dataPromise;
-  buffer = rawOutput;
-
-  const lines = buffer.split('\n');
-  for (const line of lines) {
-    const text = processLine(line);
-    if (text) {
-      fullResponse += text;
-      yield text;
-    }
-  }
+  // Handle stderr
+  proc.stderr.on('data', (data: Buffer) => {
+    logger.warn('Claude stderr', { data: data.toString() });
+  });
 
   const detectedWorkflowIds = parseWorkflowIds(fullResponse);
 

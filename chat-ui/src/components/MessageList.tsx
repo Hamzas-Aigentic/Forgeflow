@@ -1,20 +1,21 @@
 import { useEffect, useRef } from 'react';
 import { Message } from './Message';
-import type { Message as MessageType } from '../types';
+import { InlineToolCard } from './InlineToolCard';
+import type { ChatItem } from '../types';
 
 interface MessageListProps {
-  messages: MessageType[];
+  chatItems: ChatItem[];
   isLoading: boolean;
 }
 
-export function MessageList({ messages, isLoading }: MessageListProps) {
+export function MessageList({ chatItems, isLoading }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [chatItems]);
 
-  if (messages.length === 0) {
+  if (chatItems.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center text-gray-500">
         <div className="text-center">
@@ -27,12 +28,21 @@ export function MessageList({ messages, isLoading }: MessageListProps) {
     );
   }
 
+  // Check if we should show the "thinking" indicator
+  // Show it if loading and the last item is a user message
+  const lastItem = chatItems[chatItems.length - 1];
+  const showThinking = isLoading && lastItem?.type === 'message' && lastItem.data.role === 'user';
+
   return (
     <div className="flex-1 overflow-y-auto p-4">
-      {messages.map((message) => (
-        <Message key={message.id} message={message} />
-      ))}
-      {isLoading && messages[messages.length - 1]?.role === 'user' && (
+      {chatItems.map((item) => {
+        if (item.type === 'message') {
+          return <Message key={item.data.id} message={item.data} />;
+        } else {
+          return <InlineToolCard key={item.data.id} card={item.data} />;
+        }
+      })}
+      {showThinking && (
         <div className="flex justify-start mb-4">
           <div className="bg-gray-800 rounded-lg px-4 py-3 text-gray-400">
             <div className="flex items-center gap-2">

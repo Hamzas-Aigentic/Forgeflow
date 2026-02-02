@@ -41,11 +41,13 @@ export interface WebSocketMessage {
 }
 
 export interface WebSocketResponse {
-  type: 'session' | 'chunk' | 'complete' | 'error' | 'workflow_error';
+  type: 'session' | 'chunk' | 'complete' | 'error' | 'workflow_error' | 'activity' | 'notification';
   sessionId?: string;
   content?: string;
   workflowIds?: string[];
   error?: string;
+  activity?: ActivityEvent;
+  notification?: NotificationPayload;
 }
 
 export interface FixRequest {
@@ -65,3 +67,39 @@ export interface FixResponse {
   error?: string;
   fullResponse?: string;
 }
+
+// Activity tracking types
+export interface ActivityEvent {
+  id: string;
+  type: 'tool_start' | 'tool_result' | 'status';
+  timestamp: Date;
+  toolName?: string;
+  toolId?: string;
+  result?: {
+    success: boolean;
+    error?: string;
+  };
+  message?: string;
+}
+
+export interface NotificationPayload {
+  id: string;
+  type: 'success' | 'error' | 'info';
+  title: string;
+  message: string;
+  workflowId?: string;
+  timestamp: Date;
+}
+
+// Generator yield types
+export interface TextYield {
+  type: 'text';
+  content: string;
+}
+
+export interface ActivityYield {
+  type: 'activity';
+  event: ActivityEvent;
+}
+
+export type ExecutorYield = TextYield | ActivityYield;

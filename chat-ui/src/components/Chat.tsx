@@ -1,21 +1,49 @@
 import { useChat } from '../hooks/useChat';
+import { useActivity } from '../hooks/useActivity';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { ConnectionStatus } from './ConnectionStatus';
 import { Sidebar } from './Sidebar';
+import { ActivityStatus } from './ActivityStatus';
+import { ActivityFeed } from './ActivityFeed';
+import { ToastContainer } from './Toast';
 
 export function Chat() {
   const {
-    messages,
+    currentStatus,
+    activities,
+    notifications,
+    isExpanded,
+    toggleExpanded,
+    addActivity,
+    addNotification,
+    dismissNotification,
+    clearAll: clearActivity,
+  } = useActivity();
+
+  const {
+    chatItems,
     workflowIds,
     isLoading,
     sessionId,
     connectionStatus,
     error,
     sendMessage,
-    clearChat,
+    clearChat: baseClearChat,
     reconnect,
-  } = useChat();
+  } = useChat({
+    onActivity: addActivity,
+    onNotification: addNotification,
+  });
+
+  // Clear both chat and activity when clearing
+  const clearChat = () => {
+    baseClearChat();
+    clearActivity();
+  };
+
+  // Show activity status when loading or there's a current status
+  const showActivityStatus = isLoading || currentStatus !== null || activities.length > 0;
 
   return (
     <div className="flex h-screen bg-gray-900">
@@ -38,13 +66,36 @@ export function Chat() {
           )}
         </header>
 
-        <MessageList messages={messages} isLoading={isLoading} />
+        {/* Activity status bar - shows current processing status */}
+        {showActivityStatus && (
+          <ActivityStatus
+            status={currentStatus}
+            onExpandClick={toggleExpanded}
+            activityCount={activities.length}
+            isExpanded={isExpanded}
+          />
+        )}
+
+        {/* Expandable activity feed */}
+        <ActivityFeed
+          activities={activities}
+          isExpanded={isExpanded}
+          onClose={toggleExpanded}
+        />
+
+        <MessageList chatItems={chatItems} isLoading={isLoading} />
 
         <ChatInput
           onSend={sendMessage}
           disabled={isLoading || connectionStatus !== 'connected'}
         />
       </div>
+
+      {/* Toast notifications - fixed position */}
+      <ToastContainer
+        notifications={notifications}
+        onDismiss={dismissNotification}
+      />
     </div>
   );
 }

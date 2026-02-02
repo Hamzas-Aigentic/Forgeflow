@@ -1,8 +1,63 @@
 import type { WebSocket } from 'ws';
-import type { WebSocketMessage, WebSocketResponse } from './types.js';
+import type { WebSocketMessage, WebSocketResponse, ActivityEvent, NotificationPayload } from './types.js';
 import { sessionManager } from './session-manager.js';
 import { executeClaudeCommand } from './claude-executor.js';
 import { logger } from './logger.js';
+
+function generateNotificationId(): string {
+  return Math.random().toString(36).substring(2, 15);
+}
+
+// Check if a tool event represents a workflow creation
+function isWorkflowCreationTool(event: ActivityEvent): boolean {
+  return event.toolName === 'mcp__n8n-mcp__n8n_create_workflow';
+}
+
+// Check if a tool event represents a workflow update
+function isWorkflowUpdateTool(event: ActivityEvent): boolean {
+  return event.toolName === 'mcp__n8n-mcp__n8n_update_full_workflow' ||
+         event.toolName === 'mcp__n8n-mcp__n8n_update_partial_workflow';
+}
+
+// Check if a tool event represents a workflow validation
+function isWorkflowValidationTool(event: ActivityEvent): boolean {
+  return event.toolName === 'mcp__n8n-mcp__validate_workflow' ||
+         event.toolName === 'mcp__n8n-mcp__n8n_validate_workflow';
+}
+
+// Generate notification for workflow operations
+function createWorkflowNotification(
+  event: ActivityEvent,
+  success: boolean
+): NotificationPayload | null {
+  if (event.type !== 'tool_result') return null;
+
+  if (isWorkflowCreationTool(event)) {
+    return {
+      id: generateNotificationId(),
+      type: success ? 'success' : 'error',
+      title: success ? 'Workflow Created' : 'Workflow Creation Failed',
+      message: success
+        ? 'A new workflow has been created successfully.'
+        : 'Failed to create workflow. Check the activity log for details.',
+      timestamp: new Date(),
+    };
+  }
+
+  if (isWorkflowUpdateTool(event)) {
+    return {
+      id: generateNotificationId(),
+      type: success ? 'success' : 'error',
+      title: success ? 'Workflow Updated' : 'Workflow Update Failed',
+      message: success
+        ? 'The workflow has been updated successfully.'
+        : 'Failed to update workflow. Check the activity log for details.',
+      timestamp: new Date(),
+    };
+  }
+
+  return null;
+}
 
 export function handleWebSocketConnection(ws: WebSocket): void {
   const sessionId = sessionManager.createSession(ws);
@@ -40,16 +95,60 @@ export function handleWebSocketConnection(ws: WebSocket): void {
       let fullResponse = '';
       const generator = executeClaudeCommand(history, userContent);
 
+      // Track the current tool for result matching
+      let currentToolEvent: ActivityEvent | null = null;
+
       let result = await generator.next();
       while (!result.done) {
-        const chunk = result.value;
-        fullResponse += chunk;
+        const item = result.value;
 
-        const chunkResponse: WebSocketResponse = {
-          type: 'chunk',
-          content: chunk,
-        };
-        ws.send(JSON.stringify(chunkResponse));
+        if (item.type === 'text') {
+          fullResponse += item.content;
+
+          const chunkResponse: WebSocketResponse = {
+            type: 'chunk',
+            content: item.content,
+          };
+          ws.send(JSON.stringify(chunkResponse));
+        } else if (item.type === 'activity') {
+          const activityEvent = item.event;
+
+          // Send activity event to client
+          const activityResponse: WebSocketResponse = {
+            type: 'activity',
+            activity: activityEvent,
+          };
+          ws.send(JSON.stringify(activityResponse));
+
+          // Track tool start for matching with result
+          if (activityEvent.type === 'tool_start') {
+            currentToolEvent = activityEvent;
+          }
+
+          // Generate notification for workflow operations
+          if (activityEvent.type === 'tool_result' && currentToolEvent) {
+            // Copy tool name from the start event to the result
+            const enrichedEvent: ActivityEvent = {
+              ...activityEvent,
+              toolName: currentToolEvent.toolName,
+            };
+
+            const notification = createWorkflowNotification(
+              enrichedEvent,
+              activityEvent.result?.success ?? true
+            );
+
+            if (notification) {
+              const notificationResponse: WebSocketResponse = {
+                type: 'notification',
+                notification,
+              };
+              ws.send(JSON.stringify(notificationResponse));
+            }
+
+            currentToolEvent = null;
+          }
+        }
 
         result = await generator.next();
       }
