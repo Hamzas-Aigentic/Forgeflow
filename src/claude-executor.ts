@@ -1,9 +1,13 @@
 import { spawn } from 'child_process';
 import { createInterface } from 'readline';
+import { fileURLToPath } from 'url';
+import path from 'path';
 import type { Message, ClaudeExecutionResult, ExecutorYield, ActivityEvent } from './types.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { parseWorkflowIds } from './response-parser.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function formatConversation(history: Message[], newMessage: string): string {
   const parts: string[] = [];
@@ -106,6 +110,7 @@ export async function* executeClaudeCommand(
 
   const proc = spawn(config.CLAUDE_COMMAND, ['-p', '--verbose', '--output-format', 'stream-json', '--dangerously-skip-permissions'], {
     stdio: ['pipe', 'pipe', 'pipe'],
+    cwd: path.resolve(__dirname, '..'),
   });
 
   proc.stdin.write(conversation);
